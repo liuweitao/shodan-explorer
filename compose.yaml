@@ -1,0 +1,27 @@
+services:
+  frontend:
+    image: liuweitao/shodan-explorer:latest
+    container_name: shodan-explorer
+    ports:
+      - "80:80"
+    depends_on:
+      - shodan-proxy
+    environment:
+      - SHODAN_API_KEY=${SHODAN_API_KEY:-shodanproxy}
+      - SHODAN_BASE_URL=${SHODAN_BASE_URL:-http://shodan-proxy:8080}
+    restart: unless-stopped
+    networks:
+      - shodan-network
+
+  shodan-proxy:
+    image: liuweitao/shodan-proxy:latest
+    container_name: shodan-proxy
+    volumes:
+      - ./config:/app/config
+    restart: unless-stopped
+    networks:
+      - shodan-network
+
+networks:
+  shodan-network:
+    driver: bridge
