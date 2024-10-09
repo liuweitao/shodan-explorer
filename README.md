@@ -28,6 +28,7 @@ Shodan Explorer 是一个 Web 项目，旨在帮助用户学习和熟悉各种 S
 
 ## 项目结构
 
+```
 shodan-explorer/
 ├── frontend/
 │   ├── src/
@@ -45,6 +46,7 @@ shodan-explorer/
 │   └── package.json
 ├── compose.yaml
 └── README.md
+```
 
 ## API 结构
 
