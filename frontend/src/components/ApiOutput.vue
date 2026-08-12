@@ -1,165 +1,134 @@
-<template>
-  <div class="columns mt-4">
-    <div class="column is-half">
-      <div class="box">
-        <h3 class="subtitle">Request</h3>
-        <template v-if="request">
-          <p><strong>URL:</strong> {{ request.url }}</p>
-          <p><strong>Method:</strong> {{ request.method }}</p>
-          <p><strong>Headers:</strong></p>
-          <pre class="content-box">{{ JSON.stringify(request.headers, null, 2) }}</pre>
-          <p v-if="request.queryParams"><strong>Query Parameters:</strong></p>
-          <pre v-if="request.queryParams" class="content-box">{{ JSON.stringify(request.queryParams, null, 2) }}</pre>
-          <p v-if="request.body"><strong>Body:</strong></p>
-          <pre v-if="request.body" class="content-box">{{ request.body }}</pre>
-        </template>
-        <p v-else>No request data available</p>
-      </div>
-    </div>
-    <div class="column is-half">
-      <div class="box response-box">
-        <h3 class="subtitle">Response</h3>
-        <div v-if="isLoading" class="has-text-centered">
-          <p>请求处理中，请稍候...</p>
-          <progress class="progress is-small is-primary" max="100">15%</progress>
-        </div>
-        <div v-else-if="response" class="response-wrapper">
-          <div class="tabs">
-            <ul>
-              <li :class="{ 'is-active': activeTab === 'json' }">
-                <a @click="activeTab = 'json'">JSON (折叠)</a>
-              </li>
-              <li :class="{ 'is-active': activeTab === 'text' }">
-                <a @click="activeTab = 'text'">Text</a>
-              </li>
-              <li :class="{ 'is-active': activeTab === 'raw' }">
-                <a @click="activeTab = 'raw'">Raw JSON</a>
-              </li>
-            </ul>
-          </div>
-          <div class="response-content" ref="responseContent">
-            <div v-if="activeTab === 'json'" class="output-content">
-              <vue-json-pretty
-                :data="response"
-                :deep="1"
-                :show-double-quotes="true"
-                :show-length="true"
-                @click="handleClick"
-              ></vue-json-pretty>
-            </div>
-            <pre v-else-if="activeTab === 'text'" class="output-content content-box">{{ formattedTextResponse }}</pre>
-            <pre v-else-if="activeTab === 'raw'" class="output-content content-box">{{ formattedRawResponse }}</pre>
-          </div>
-          <div class="buttons mt-3">
-            <button @click="copyToClipboard" class="button is-primary is-small">
-              复制到剪贴板
-            </button>
-            <button @click="saveToFile" class="button is-info is-small">
-              保存到文件
-            </button>
-          </div>
-        </div>
-        <p v-else>No response data available</p>
-      </div>
-    </div>
-  </div>
-</template>
+<script setup lang="ts">
+import { computed, ref } from 'vue'
 
-<script>
-import VueJsonPretty from 'vue-json-pretty';
-import 'vue-json-pretty/lib/styles.css';
+import JsonTree from '@/components/JsonTree.vue'
+import type { RequestSnapshot } from '@/types/api'
 
-export default {
-  name: 'ApiOutput',
-  components: {
-    VueJsonPretty
-  },
-  props: ['request', 'response'],
-  data() {
-    return {
-      isLoading: false,
-      activeTab: 'json'
-    }
-  },
-  computed: {
-    formattedTextResponse() {
-      if (typeof this.response === 'object') {
-        return JSON.stringify(this.response, null, 2)
-          .replace(/[{[]/g, '')
-          .replace(/[}\]]/g, '')
-          .replace(/,\n/g, '\n')
-          .replace(/"/g, '')
-          .replace(/^\s{2}/gm, '')
-          .trim();
-      }
-      return this.response;
-    },
-    formattedRawResponse() {
-      return JSON.stringify(this.response, null, 2);
-    }
-  },
-  methods: {
-    handleClick(path, data, expanded) {},
-    copyToClipboard() {
-      const textToCopy = JSON.stringify(this.response, null, 2);
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        alert('Response copied to clipboard');
-      }, (err) => {
-        console.error('Could not copy text: ', err);
-      });
-    },
-    saveToFile() {
-      const textToSave = JSON.stringify(this.response, null, 2);
-      const blob = new Blob([textToSave], { type: 'text/plain' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = 'api_response.txt';
-      link.click();
-      URL.revokeObjectURL(link.href);
-    }
-  },
-  watch: {
-    request() {
-      this.isLoading = true;
-    },
-    response() {
-      this.isLoading = false;
-    }
+type OutputTab = 'tree' | 'formatted' | 'raw'
+
+const props = defineProps<{
+  request: RequestSnapshot | null
+  response: unknown
+  hasResponse: boolean
+  isLoading: boolean
+}>()
+
+const activeTab = ref<OutputTab>('tree')
+const copyStatus = ref('')
+
+const formattedResponse = computed(() => {
+  if (typeof props.response === 'string') return props.response
+  return JSON.stringify(props.response, null, 2)
+})
+
+const rawResponse = computed(() => {
+  if (typeof props.response === 'string') return props.response
+  return JSON.stringify(props.response)
+})
+
+async function copyToClipboard() {
+  try {
+    await navigator.clipboard.writeText(formattedResponse.value ?? '')
+    copyStatus.value = 'Copied.'
+  } catch {
+    copyStatus.value = 'Copy failed. Select the response text manually.'
   }
+}
+
+function saveToFile() {
+  const blob = new Blob([formattedResponse.value ?? ''], {
+    type: 'application/json;charset=utf-8'
+  })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'shodan-response.json'
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 </script>
 
-<style scoped>
-.response-box {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
+<template>
+  <section class="results-section" aria-labelledby="results-heading">
+    <div class="section-heading results-heading">
+      <div>
+        <p class="step-label">Step 3</p>
+        <h2 id="results-heading">Inspect the exchange</h2>
+      </div>
+      <span v-if="isLoading" class="loading-label" role="status">Request in progress…</span>
+    </div>
 
-.response-wrapper {
-  position: relative;
-  height: 100%;
-}
+    <div class="result-grid">
+      <article class="card result-card">
+        <h3>Request</h3>
+        <dl v-if="request" class="request-details">
+          <div>
+            <dt>URL</dt>
+            <dd>
+              <code>{{ request.url }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>Method</dt>
+            <dd>
+              <span class="method-badge">{{ request.method }}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>Headers</dt>
+            <dd>
+              <pre>{{ JSON.stringify(request.headers, null, 2) }}</pre>
+            </dd>
+          </div>
+          <div v-if="request.body">
+            <dt>Body</dt>
+            <dd>
+              <pre>{{ request.body }}</pre>
+            </dd>
+          </div>
+        </dl>
+        <p v-else class="empty-state">Submit the form to see the redacted request.</p>
+      </article>
 
-.response-content {
-  flex-grow: 1;
-  overflow: hidden;
-  max-height: 600px;
-  overflow-y: auto;
-}
+      <article class="card result-card response-card" aria-live="polite">
+        <div class="response-title">
+          <h3>Response</h3>
+          <div v-if="hasResponse" class="response-actions">
+            <button class="button button-quiet" type="button" @click="copyToClipboard">Copy</button>
+            <button class="button button-quiet" type="button" @click="saveToFile">Save</button>
+          </div>
+        </div>
 
-.output-content {
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
+        <div v-if="isLoading" class="loading-state">
+          <span class="spinner" aria-hidden="true" />
+          <p>Waiting for Shodan…</p>
+        </div>
 
-.content-box {
-  max-width: 100%;
-}
+        <template v-else-if="hasResponse">
+          <div class="tabs" role="tablist" aria-label="Response format">
+            <button
+              v-for="tab in ['tree', 'formatted', 'raw'] as OutputTab[]"
+              :key="tab"
+              class="tab-button"
+              :class="{ active: activeTab === tab }"
+              type="button"
+              role="tab"
+              :aria-selected="activeTab === tab"
+              @click="activeTab = tab"
+            >
+              {{ tab }}
+            </button>
+          </div>
+          <div class="response-output" role="tabpanel">
+            <JsonTree v-if="activeTab === 'tree'" :data="response" />
+            <pre v-else-if="activeTab === 'formatted'">{{ formattedResponse }}</pre>
+            <pre v-else>{{ rawResponse }}</pre>
+          </div>
+          <p class="copy-status" role="status">{{ copyStatus }}</p>
+        </template>
 
-/deep/ .vjs-tree {
-  max-width: 100%;
-  overflow-x: auto;
-}
-</style>
+        <p v-else class="empty-state">The response will appear here.</p>
+      </article>
+    </div>
+  </section>
+</template>

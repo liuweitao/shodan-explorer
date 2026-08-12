@@ -1,24 +1,73 @@
 services:
   frontend:
-    image: liuweitao/shodan-explorer:latest
-    container_name: shodan-explorer
+    build:
+      context: ./frontend
+    image: ${SHODAN_EXPLORER_IMAGE:-liuweitao/shodan-explorer:2.0.0}
     ports:
-      - "80:80"
+      - "${SHODAN_EXPLORER_BIND_ADDRESS:-127.0.0.1}:${SHODAN_EXPLORER_PORT:-8080}:8080"
     depends_on:
-      - shodan-proxy
+      shodan-proxy:
+        condition: service_healthy
+        restart: true
     environment:
-      - SHODAN_API_KEY=${SHODAN_API_KEY:-shodanproxy}
-      - SHODAN_BASE_URL=${SHODAN_BASE_URL:-http://shodan-proxy:8080}
+      SHODAN_API_KEY: ${SHODAN_API_KEY:-shodanproxy}
+      SHODAN_BASE_URL: ${SHODAN_BASE_URL:-http://shodan-proxy:8080}
     restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0750
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0750
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.50
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 10m
     networks:
       - shodan-network
 
   shodan-proxy:
-    image: liuweitao/shodan-proxy:latest
-    container_name: shodan-proxy
+    image: liuweitao/shodan-proxy:1.0.3@sha256:ac90519f92b3441d110812972464c6342ceac411a80cc14bfbd1e9d57eee1b86
+    ports:
+      - "127.0.0.1:${SHODAN_PROXY_ADMIN_PORT:-8081}:8080"
     volumes:
       - ./config:/app/config
     restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1.00
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/tools/myip",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 10m
     networks:
       - shodan-network
 

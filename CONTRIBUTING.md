@@ -1,43 +1,55 @@
-# 贡献指南
+# Contributing to Shodan Explorer
 
-感谢您考虑为 Shodan Explorer 项目做出贡献！我们欢迎任何形式的贡献，包括但不限于：
+[简体中文](CONTRIBUTING_CN.md)
 
-- 报告 bug
-- 提交新功能建议
-- 改进文档
-- 提交代码改进或新功能的 Pull Request
+Thank you for improving Shodan Explorer. Bug reports, documentation fixes, tests,
+security hardening, and focused feature proposals are welcome.
 
-## 如何贡献
+## Before you start
 
-1. Fork 本仓库
-2. 创建您的特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 将您的更改推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启一个 Pull Request
+- Use Node.js 24.15 or newer in the Node 24 line.
+- Use the package manager pinned in `frontend/package.json` through Corepack.
+- Never commit `.env`, `config/config.yaml`, `config/shodan_keys.yaml`, API keys,
+  proxy credentials, or captured Shodan responses containing sensitive data.
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 
-## 代码风格
+## Development setup
 
-- 请确保您的代码符合项目现有的代码风格
-- 使用有意义的变量名和函数名
-- 添加必要的注释，但避免过度注释
-- 保持代码简洁和可读性
+```sh
+git clone https://github.com/liuweitao/shodan-explorer.git
+cd shodan-explorer/frontend
+cp .env.example .env.local
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev
+```
 
-## 报告 Bug
+The default development target is the proxy administration binding at
+`http://127.0.0.1:8081`. Start it from the repository root with:
 
-如果您发现了 bug，请在 GitHub Issues 中创建一个新的 issue，并尽可能详细地描述：
+```sh
+docker compose up -d shodan-proxy
+```
 
-- 问题的具体表现
-- 复现步骤
-- 预期行为
-- 截图（如果适用）
-- 您的环境信息（操作系统、浏览器版本等）
+## Quality checks
 
-## 提出新功能建议
+Run the complete local gate before opening a pull request:
 
-如果您有新功能的想法，我们也非常欢迎！请在 GitHub Issues 中创建一个新的 issue，并描述：
+```sh
+pnpm run check
+pnpm audit --prod --audit-level=high
+```
 
-- 新功能的具体内容
-- 为什么这个功能对项目有帮助
-- 如果可能，提供一些实现的思路
+Add or update tests for behavior changes. Request-building tests must confirm that
+displayed snapshots redact the `key` parameter.
 
-感谢您的贡献！
+## Pull requests
+
+1. Create a focused branch.
+2. Keep unrelated formatting or dependency changes out of the pull request.
+3. Explain the user-visible behavior, security impact, and verification performed.
+4. Update both `README.md` and `README_CN.md` when their shared content changes.
+5. Wait for CI, dependency review, tests, and container build to pass.
+
+Dependency updates must retain exact versions, the seven-day maturity policy, and
+the lifecycle-script allowlist. Do not bypass these controls to make an upgrade pass.

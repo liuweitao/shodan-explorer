@@ -1,24 +1,45 @@
-# Build stage
-FROM node:14 AS build-stage
+# syntax=docker/dockerfile:1.7
+
+FROM node:24-alpine3.24@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
-RUN npm install vue-json-pretty
+
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm install --frozen-lockfile
+
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
-# Production stage
-FROM nginx:stable-alpine AS production-stage
-COPY --from=build-stage /app/dist /usr/share/nginx/html
+FROM nginx:1.30.4-alpine3.24@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46 AS runtime
+
+RUN rm -f /etc/nginx/conf.d/default.conf && \
+    mkdir -p /var/cache/nginx /docker-entrypoint.d && \
+    chown -R nginx:nginx /var/cache/nginx /docker-entrypoint.d /usr/share/nginx/html
+
+COPY nginx-main.conf /etc/nginx/nginx.conf
 COPY nginx.conf /etc/nginx/templates/default.conf.template
-EXPOSE 80
+COPY shodan-proxy-params.conf /etc/nginx/shodan-proxy-params.conf
+COPY env.sh /docker-entrypoint.d/05-runtime-config.sh
+COPY --from=build --chown=nginx:nginx /app/dist/ /usr/share/nginx/html/
 
-# Copy env.sh
-COPY env.sh /docker-entrypoint.d/40-env.sh
-RUN chmod +x /docker-entrypoint.d/40-env.sh
+RUN chmod 0555 /docker-entrypoint.d/05-runtime-config.sh
 
-# Declare environment variables
-ENV SHODAN_API_KEY=
-ENV SHODAN_BASE_URL=
+ENV NGINX_ENVSUBST_OUTPUT_DIR=/tmp/nginx-conf.d
+ENV SHODAN_API_KEY=shodanproxy
+ENV SHODAN_BASE_URL=http://shodan-proxy:8080
+
+USER nginx
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget --quiet --output-document=/dev/null http://127.0.0.1:8080/healthz || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

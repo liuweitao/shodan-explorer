@@ -2,9 +2,11 @@
 node_modules/
 npm-debug.log
 yarn-error.log
+pnpm-debug.log
 
-# Vue.js
-/dist/
+# Build and package-manager output
+dist/
+.pnpm-store/
 
 # Editor directories and files
 .idea
@@ -33,9 +35,13 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Docker
 docker-compose.override.yml
 
-# Config directory
-/config/
+# Runtime proxy configuration (examples remain versioned)
+/config/*
+!/config/README.md
+!/config/config.example.yaml
+!/config/shodan_keys.example.yaml

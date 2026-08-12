@@ -1,0 +1,26 @@
+# Review these networks for your environment. Remove every range that does not
+# contain an authorized developer or the local Docker bridge.
+allowed_ips:
+  - "127.0.0.1/32"
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+
+# Trust only the network containing the frontend reverse proxy. Narrow this
+# range when your Docker network has a fixed subnet.
+trusted_proxies:
+  - "172.16.0.0/12"
+
+blocked_paths:
+  - "/shodan/data"
+  - "/org"
+  - "/shodan/alert"
+  - "/notifier"
+  - "/account/profile"
+  - "/api-info"
+
+# v1.0.3 initializes the documented default credentials when these are blank.
+# Start on localhost and change the password immediately at /admin.
+admin_user:
+  username: ""
+  password: ""

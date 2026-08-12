@@ -1,0 +1,13 @@
+packages: []
+
+# Hold newly published packages for seven days so compromised releases have
+# time to be detected before they enter the lockfile.
+minimumReleaseAge: 10080
+
+# pnpm blocks dependency lifecycle scripts by default. Vite needs esbuild's
+# verified platform binary setup, so it is the only approved build dependency.
+onlyBuiltDependencies:
+  - esbuild
+
+blockExoticSubdeps: true
+strictPeerDependencies: true

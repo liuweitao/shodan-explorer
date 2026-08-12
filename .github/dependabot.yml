@@ -1,0 +1,42 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    versioning-strategy: increase
+    groups:
+      vue-toolchain:
+        patterns:
+          - "vue"
+          - "@vue/*"
+          - "vite"
+          - "@vitejs/*"
+      quality-toolchain:
+        dependency-type: development
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "eslint-*"
+          - "typescript"
+          - "typescript-eslint"
+          - "vitest"
+          - "prettier"
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

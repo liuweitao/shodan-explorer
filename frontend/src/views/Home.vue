@@ -1,136 +1,134 @@
-<template>
-  <div class="container">
-    <h1 class="title">Shodan Explorer</h1>
-    <div class="select is-fullwidth">
-      <select v-model="selectedApi" @change="resetForm">
-        <option value="">Select an API</option>
-        <optgroup v-for="(group, index) in apiGroups" :key="index" :label="`${group.chineseName} - ${group.name}`">
-          <option v-for="api in group.apis" :key="api.name" :value="api.name">
-            {{ api.chineseName }} - {{ api.name }} - [{{ api.method || 'GET' }}] {{ api.endpoint }}
-          </option>
-        </optgroup>
-      </select>
-    </div>
-    <div v-if="selectedApi" class="mt-4">
-      <api-form :api="getSelectedApi" @submit="handleSubmit"></api-form>
-      <api-output :request="getSelectedApi.request" :response="getSelectedApi.response"></api-output>
-    </div>
-  </div>
-</template>
+<script setup lang="ts">
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 
-<script>
 import ApiForm from '@/components/ApiForm.vue'
 import ApiOutput from '@/components/ApiOutput.vue'
 import { apiGroups } from '@/data/apiGroups'
+import { runtimeConfigKey } from '@/runtime/config'
+import {
+  executeShodanRequest,
+  prepareShodanRequest,
+  ShodanRequestError
+} from '@/services/shodanClient'
+import type { ApiErrorPayload, FormData, RequestSnapshot } from '@/types/api'
 
-export default {
-  name: 'Home',
-  components: {
-    ApiForm,
-    ApiOutput
-  },
-  data() {
-    return {
-      selectedApi: '',
-      apiGroups: apiGroups,
-      apiKey: window.ENV.SHODAN_API_KEY || '',
+const runtimeConfig = inject(runtimeConfigKey)
+const selectedApiName = ref('')
+const request = ref<RequestSnapshot | null>(null)
+const response = ref<unknown>(null)
+const hasResponse = ref(false)
+const isLoading = ref(false)
+let activeRequest: AbortController | null = null
+
+const selectedApi = computed(() => {
+  for (const group of apiGroups) {
+    const api = group.apis.find((candidate) => candidate.name === selectedApiName.value)
+    if (api) return api
+  }
+  return undefined
+})
+
+const configuredApiKey = computed(() => runtimeConfig?.shodanApiKey ?? '')
+
+function resetResult() {
+  activeRequest?.abort()
+  activeRequest = null
+  request.value = null
+  response.value = null
+  hasResponse.value = false
+  isLoading.value = false
+}
+
+watch(selectedApiName, resetResult)
+onBeforeUnmount(() => activeRequest?.abort())
+
+async function handleSubmit(formData: FormData) {
+  if (!selectedApi.value) return
+
+  activeRequest?.abort()
+  const controller = new AbortController()
+  activeRequest = controller
+
+  try {
+    const prepared = prepareShodanRequest(selectedApi.value, formData, configuredApiKey.value)
+    request.value = prepared.snapshot
+    response.value = null
+    hasResponse.value = false
+    isLoading.value = true
+
+    response.value = await executeShodanRequest(prepared, controller.signal)
+    hasResponse.value = true
+  } catch (error) {
+    if (controller.signal.aborted && activeRequest !== controller) return
+
+    const payload: ApiErrorPayload = {
+      error: error instanceof Error ? error.message : 'An unexpected error occurred.'
     }
-  },
-  computed: {
-    getSelectedApi() {
-      for (const group of this.apiGroups) {
-        const api = group.apis.find(api => api.name === this.selectedApi)
-        if (api) return api
-      }
-      return null
+    if (error instanceof ShodanRequestError && error.status !== undefined) {
+      payload.status = error.status
     }
-  },
-  methods: {
-    resetForm() {
-      if (this.getSelectedApi) {
-        this.getSelectedApi.request = null
-        this.getSelectedApi.response = null
-      }
-    },
-    async handleSubmit(apiName, formData) {
-      const api = this.getSelectedApi
-      if (!api) {
-        return
-      }
-
-      let url = api.endpoint
-      let body = null
-      const headers = {}
-
-      const queryParams = new URLSearchParams()
-      queryParams.append('key', this.apiKey)  // 添加 API 密钥作为查询参数
-
-      for (const [key, value] of Object.entries(formData)) {
-        if (value === null || value === undefined || value === '') {
-          continue;
-        }
-        
-        if (api.endpoint.includes(`{${key}}`)) {
-          url = url.replace(`{${key}}`, encodeURIComponent(value))
-        } else if (api.method === 'GET' || !api.method) {
-          queryParams.append(key, typeof value === 'object' ? JSON.stringify(value) : value)
-        } else {
-          if (!body) body = new URLSearchParams()
-          body.append(key, typeof value === 'object' ? JSON.stringify(value) : value)
-        }
-      }
-
-      // 对所有请求都添加 API 密钥作为查询参数
-      url += (url.includes('?') ? '&' : '?') + queryParams.toString()
-
-      if (api.method !== 'GET' && api.method) {
-        headers['Content-Type'] = 'application/x-www-form-urlencoded'
-        
-        if (api.jsonBody) {
-          headers['Content-Type'] = 'application/json'
-          const jsonBody = {}
-          for (const key of api.jsonBody) {
-            if (formData[key] !== undefined) {
-              jsonBody[key] = formData[key]
-            }
-          }
-          body = JSON.stringify(jsonBody)
-        }
-      }
-
-      api.request = {
-        url: url,
-        method: api.method || 'GET',
-        headers: headers,
-        body: body ? body.toString() : null,
-        queryParams: Object.fromEntries(queryParams)
-      }
-
-      try {
-        const response = await fetch(url, {
-          method: api.method || 'GET',
-          headers: headers,
-          body: body,
-        })
-
-        const data = await response.json()
-
-        if (!response.ok) {
-          let errorMessage = data.error || 'Unknown error occurred'
-          api.response = { error: errorMessage }
-        } else {
-          api.response = data
-        }
-      } catch (error) {
-        api.response = { error: '请求失败，请检查网络连接或稍后重试。' }
-      }
+    response.value = payload
+    hasResponse.value = true
+  } finally {
+    if (activeRequest === controller) {
+      activeRequest = null
+      isLoading.value = false
     }
   }
 }
 </script>
 
-<style scoped>
-.container {
-  padding: 20px;
-}
-</style>
+<template>
+  <section class="hero" aria-labelledby="page-title">
+    <p class="eyebrow">Shodan API workbench</p>
+    <h1 id="page-title">Explore the Shodan API with clarity.</h1>
+    <p class="hero-copy">
+      Choose an endpoint, provide its parameters, and inspect the exact request and response.
+      Requests retain the standard Shodan <code>base_url + key</code> contract.
+    </p>
+  </section>
+
+  <div v-if="!configuredApiKey" class="notice notice-error" role="alert">
+    No API key is configured. Set <code>SHODAN_API_KEY</code> before sending requests.
+  </div>
+
+  <section class="card endpoint-picker" aria-labelledby="endpoint-heading">
+    <div class="section-heading">
+      <div>
+        <p class="step-label">Step 1</p>
+        <h2 id="endpoint-heading">Select an endpoint</h2>
+      </div>
+      <span class="endpoint-count">
+        {{ apiGroups.reduce((total, group) => total + group.apis.length, 0) }} endpoints
+      </span>
+    </div>
+
+    <label class="field-label" for="api-select">API endpoint</label>
+    <div class="select-wrap">
+      <select id="api-select" v-model="selectedApiName">
+        <option value="">Choose an API…</option>
+        <optgroup
+          v-for="group in apiGroups"
+          :key="group.name"
+          :label="`${group.chineseName} · ${group.name}`"
+        >
+          <option v-for="api in group.apis" :key="api.name" :value="api.name">
+            {{ api.chineseName }} · {{ api.name }} · [{{ api.method ?? 'GET' }}]
+            {{ api.endpoint }}
+          </option>
+        </optgroup>
+      </select>
+      <span aria-hidden="true">⌄</span>
+    </div>
+  </section>
+
+  <template v-if="selectedApi">
+    <ApiForm :key="selectedApi.name" :api="selectedApi" @submit="handleSubmit" />
+    <ApiOutput
+      :request="request"
+      :response="response"
+      :has-response="hasResponse"
+      :is-loading="isLoading"
+    />
+  </template>
+</template>
