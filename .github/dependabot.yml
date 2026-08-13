@@ -8,6 +8,10 @@ updates:
       time: "03:00"
       timezone: Asia/Shanghai
     versioning-strategy: increase
+    # Keep Dependabot behind pnpm's seven-day package maturity gate. The extra
+    # day avoids boundary failures caused by different run times and time zones.
+    cooldown:
+      default-days: 8
     ignore:
       # TypeScript 7 is outside typescript-eslint's supported peer range.
       - dependency-name: typescript
