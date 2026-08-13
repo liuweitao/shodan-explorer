@@ -8,6 +8,11 @@ updates:
       time: "03:00"
       timezone: Asia/Shanghai
     versioning-strategy: increase
+    ignore:
+      # TypeScript 7 is outside typescript-eslint's supported peer range.
+      - dependency-name: typescript
+        versions:
+          - ">=7"
     groups:
       vue-toolchain:
         patterns:
@@ -30,11 +35,11 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
-
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
+    ignore:
+      # Node 26 no longer bundles Corepack and is not an LTS release yet.
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
