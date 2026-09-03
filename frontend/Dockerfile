@@ -19,7 +19,7 @@ RUN pnpm run build
 
 FROM nginx:1.31.4-alpine3.24@sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913 AS runtime
 
-RUN apk upgrade --no-cache libcrypto3 libssl3 && \
+RUN apk upgrade --no-cache libcrypto3 libssl3 libexpat && \
     rm -f /etc/nginx/conf.d/default.conf && \
     mkdir -p /var/cache/nginx /docker-entrypoint.d && \
     chown -R nginx:nginx /var/cache/nginx /docker-entrypoint.d /usr/share/nginx/html
