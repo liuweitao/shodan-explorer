@@ -21,14 +21,14 @@
     "check": "prettier --check . && eslint . --max-warnings=0 && vue-tsc --noEmit && vitest run && vite build"
   },
   "dependencies": {
-    "vue": "3.5.41"
+    "vue": "3.5.42"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "24.13.3",
     "@vitejs/plugin-vue": "6.0.8",
-    "@vue/compiler-sfc": "3.5.41",
-    "@vue/test-utils": "2.4.11",
+    "@vue/compiler-sfc": "3.5.42",
+    "@vue/test-utils": "2.5.0",
     "eslint": "10.9.0",
     "eslint-plugin-vue": "10.10.0",
     "globals": "17.11.0",
