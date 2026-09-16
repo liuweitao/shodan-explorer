@@ -17,7 +17,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY . .
 RUN pnpm run build
 
-FROM nginx:1.31.4-alpine3.24@sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913 AS runtime
+FROM nginx:1.31.6-alpine3.24@sha256:d0a6faaed2491faecdb9021f449e8edd7b1bbba246fe2ddf7eba63cccd5b9803 AS runtime
 
 RUN apk upgrade --no-cache libcrypto3 libssl3 libexpat && \
     rm -f /etc/nginx/conf.d/default.conf && \
