@@ -146,6 +146,8 @@ pnpm audit --audit-level=high
 - 禁止传递依赖使用 Git、任意 URL 等非常规来源。
 - 依赖构建脚本默认禁止，当前只允许经过审核的 `esbuild`。
 - CI 使用冻结锁文件安装，审查依赖变更，审计完整依赖图并构建容器。
+- Actions 在全部 CI 通过后自动合并兼容的前端 Dependabot 更新；大版本、容器和工作流变更仍需人工审核。
+  添加 `do-not-automerge` 标签可保留人工处理，详见 [自动合并策略](SECURITY.md#dependency-auto-merge)。
 - 发布镜像附带 SBOM 和构建来源证明。
 - 常规更新每周按前端、容器、Actions 分组，大版本单独审核；版本更新 PR 同时最多四个，安全更新单独处理。
 - Node.js 十月漏洞的影响边界与维护流程见 [安全说明](SECURITY.md#october-2026-nodejs-security-assessment)。

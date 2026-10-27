@@ -157,6 +157,9 @@ pnpm audit --audit-level=high
   is currently allowed.
 - CI installs with `--frozen-lockfile`, reviews dependency changes, audits the complete
   dependency graph, and builds the container.
+- Actions auto-merges compatible frontend Dependabot updates after every CI gate passes.
+  Major upgrades, container images, and workflow changes require manual review; add
+  `do-not-automerge` to keep a PR manual. See [automation policy](SECURITY.md#dependency-auto-merge).
 - Release images include an SBOM and build provenance.
 - Weekly routine updates are grouped into frontend, container, and Actions PRs;
   major versions receive separate review. See [dependency maintenance](SECURITY.md#dependency-pull-request-maintenance).

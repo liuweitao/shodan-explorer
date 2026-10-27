@@ -1,0 +1,42 @@
+name: Auto-merge compatible Dependabot updates
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: dependabot-automerge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Evaluate Dependabot PR
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      # workflow_run uses trusted default-branch code. Never check out a PR or
+      # download its artifacts in this privileged workflow.
+      - name: Check out trusted automation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Apply the auto-merge policy
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { automate } = require('./.github/scripts/dependabot-automerge.cjs');
+            await automate({ github, context, core });
