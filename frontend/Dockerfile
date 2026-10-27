@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-alpine3.24@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
+FROM node:24.22.1-alpine3.24@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS build
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -17,9 +17,9 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY . .
 RUN pnpm run build
 
-FROM nginx:1.31.4-alpine3.24@sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913 AS runtime
+FROM nginx:1.31.7-alpine3.24@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d AS runtime
 
-RUN apk upgrade --no-cache libcrypto3 libssl3 libexpat && \
+RUN apk upgrade --no-cache && \
     rm -f /etc/nginx/conf.d/default.conf && \
     mkdir -p /var/cache/nginx /docker-entrypoint.d && \
     chown -R nginx:nginx /var/cache/nginx /docker-entrypoint.d /usr/share/nginx/html
