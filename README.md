@@ -46,7 +46,7 @@ not exposed through the Explorer port.
 ## Requirements
 
 - Docker Engine with Docker Compose v2; or
-- Node.js 24.15 or newer in the Node 24 line and pnpm 11.21 for local frontend work.
+- Node.js 24.22.1 or newer in the Node 24 line and pnpm 11.21 for local frontend work.
 
 The complete Compose stack currently requires `linux/amd64` because the pinned
 `shodan-proxy v1.0.3` image does not publish an arm64 runtime image. The Explorer
@@ -144,7 +144,7 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm audit --prod --audit-level=high
+pnpm audit --audit-level=high
 ```
 
 ## Dependency policy
@@ -155,9 +155,11 @@ pnpm audit --prod --audit-level=high
 - Transitive Git, URL, and other exotic dependency sources are blocked.
 - Dependency build scripts are blocked unless explicitly approved; only `esbuild`
   is currently allowed.
-- CI installs with `--frozen-lockfile`, reviews dependency changes, audits production
-  packages, and builds the container.
+- CI installs with `--frozen-lockfile`, reviews dependency changes, audits the complete
+  dependency graph, and builds the container.
 - Release images include an SBOM and build provenance.
+- Weekly routine updates are grouped into frontend, container, and Actions PRs;
+  major versions receive separate review. See [dependency maintenance](SECURITY.md#dependency-pull-request-maintenance).
 
 ## API coverage
 

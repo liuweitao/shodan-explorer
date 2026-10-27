@@ -41,7 +41,7 @@ Explorer Nginx ── Docker 内部网络 ──► shodan-proxy :8080 ──►
 ## 环境要求
 
 - Docker Engine 与 Docker Compose v2；或者
-- 本地前端开发使用 Node.js 24.15 以上的 Node 24 版本，以及 pnpm 11.21。
+- 本地前端开发使用 Node.js 24.22.1 以上的 Node 24 版本，以及 pnpm 11.21。
 
 由于固定的 `shodan-proxy v1.0.3` 没有发布 arm64 运行镜像，完整 Compose 栈当前
 需要 `linux/amd64`。Explorer 镜像本身支持 amd64 和 arm64。
@@ -136,7 +136,7 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm audit --prod --audit-level=high
+pnpm audit --audit-level=high
 ```
 
 ## 依赖安全策略
@@ -145,8 +145,10 @@ pnpm audit --prod --audit-level=high
 - 新发布的软件包默认经过七天观察期。
 - 禁止传递依赖使用 Git、任意 URL 等非常规来源。
 - 依赖构建脚本默认禁止，当前只允许经过审核的 `esbuild`。
-- CI 使用冻结锁文件安装，审查依赖变更，审计生产依赖并构建容器。
+- CI 使用冻结锁文件安装，审查依赖变更，审计完整依赖图并构建容器。
 - 发布镜像附带 SBOM 和构建来源证明。
+- 常规更新每周按前端、容器、Actions 分组，大版本单独审核；版本更新 PR 同时最多四个，安全更新单独处理。
+- Node.js 十月漏洞的影响边界与维护流程见 [安全说明](SECURITY.md#october-2026-nodejs-security-assessment)。
 
 ## API 覆盖范围
 

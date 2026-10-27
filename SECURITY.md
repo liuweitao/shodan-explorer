@@ -64,3 +64,60 @@ defense-in-depth measures and do not change the proxy's underlying behavior.
   and a container build.
 - Base images and the proxy image are pinned by digest.
 - Release images publish an SBOM and build provenance.
+
+## October 2026 Node.js security assessment
+
+The [October 21 Node.js security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+fixes vulnerabilities affecting Node 24, including Brotli memory corruption
+(CVE-2026-111497), DNS NUL truncation (CVE-2026-105482), TLS hostname verification
+bypasses (CVE-2026-105483, CVE-2026-106069, CVE-2026-106072), HTTP keep-alive
+response injection (CVE-2026-105481), snapshot entropy reuse (CVE-2026-106074),
+and a permission-model bypass (CVE-2026-106073). The Node 26-only ZIP and wildcard
+permission issues in that advisory do not apply to this project's Node 24 target.
+
+Node 24.19.0, previously selected for CI and local development, predates these
+fixes. Use **Node 24.22.1 or a newer patched Node 24 release**. CI and release
+validation read `.nvmrc`; the frontend engine floor and Docker build image must be
+updated alongside it. The build image is pinned to the verified 24.22.1 digest.
+
+| Surface | Assessment |
+| --- | --- |
+| Production frontend | The final image serves static browser assets with Nginx and contains no Node.js runtime. These Node.js vulnerabilities have no direct execution path in this image. |
+| CI, package installation, local development | These execute Node.js and must use the patched release. Installation and development tools process network and compressed data; absence of direct application calls is not a sufficient mitigation. |
+| Application code | Shodan requests use browser `fetch`. The application does not implement Node DNS/TLS clients, Brotli decoding, startup snapshots, or the Node permission model. |
+| Bundled proxy | This is an independently built, digest-pinned image. This assessment does not attest to the proxy image's internal dependencies or any deployed host's Node version. |
+
+The same maintenance update upgrades vulnerable Vue/Vite/Vitest dependencies and
+adds bounded overrides for patched `brace-expansion`, `source-map-js`, and
+`postcss-selector-parser` versions. The complete lockfile audit had zero reported
+vulnerabilities on October 27, 2026. This is a point-in-time registry audit, not a
+guarantee against later disclosures. The Nginx stage upgrades all available Alpine
+packages, covering the `libx11` fix that blocked earlier container scans.
+
+[Maintenance validation on GitHub Actions](https://github.com/liuweitao/shodan-explorer/actions/runs/40471426682)
+passed the frontend checks, full dependency audit, container build, hardened
+container smoke test, and HIGH/CRITICAL Trivy scan. The validation branch adds only
+a push trigger to the maintenance code. PR dependency review still requires an
+actual pull request and was skipped in this push-triggered validation.
+
+## Dependency pull request maintenance
+
+Dependabot runs on Mondays at 03:00 Asia/Shanghai. Routine minor and patch updates
+are grouped into one frontend toolchain PR, one container PR, and one Actions PR.
+Frontend and Actions major upgrades remain separate for compatibility review;
+Node major upgrades and unsupported TypeScript majors stay excluded. Version-update
+PR limits are two for npm and one each for Docker and Actions (four in total).
+Security updates have their own frontend group and are not subject to these
+version-update PR limits or Dependabot's version-update cooldown.
+
+The seven-day pnpm package maturity policy still applies to installation, including
+security updates. If an urgent fix is younger than seven days, review it and add
+only an exact package-version exception before updating the lockfile; do not
+disable the policy globally. All fixes adopted in this maintenance update passed
+the existing maturity policy without exceptions.
+
+Merge dependency updates only after the complete frontend checks, dependency
+review, container build, smoke test, and HIGH/CRITICAL image scan pass. When several
+updates are blocked by the same advisory, validate a consolidated update rather
+than merging failing PRs individually. Remove obsolete overrides when the normal
+dependency graph resolves patched versions without them.
