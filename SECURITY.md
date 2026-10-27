@@ -94,6 +94,12 @@ vulnerabilities on October 27, 2026. This is a point-in-time registry audit, not
 guarantee against later disclosures. The Nginx stage upgrades all available Alpine
 packages, covering the `libx11` fix that blocked earlier container scans.
 
+[Maintenance validation on GitHub Actions](https://github.com/liuweitao/shodan-explorer/actions/runs/40471426682)
+passed the frontend checks, full dependency audit, container build, hardened
+container smoke test, and HIGH/CRITICAL Trivy scan. The validation branch adds only
+a push trigger to the maintenance code. PR dependency review still requires an
+actual pull request and was skipped in this push-triggered validation.
+
 ## Dependency pull request maintenance
 
 Dependabot runs on Mondays at 03:00 Asia/Shanghai. Routine minor and patch updates
