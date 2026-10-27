@@ -121,3 +121,38 @@ review, container build, smoke test, and HIGH/CRITICAL image scan pass. When sev
 updates are blocked by the same advisory, validate a consolidated update rather
 than merging failing PRs individually. Remove obsolete overrides when the normal
 dependency graph resolves patched versions without them.
+
+## Dependency auto-merge
+
+The `Auto-merge compatible Dependabot updates` workflow runs after successful PR CI.
+It uses the repository's `GITHUB_TOKEN`; no personal token or automatic approval is
+needed. It calls the SHA-guarded merge API after checking its own policy, so the
+repository's optional GitHub auto-merge setting is not required. Repository branch
+protections and required reviews still apply.
+
+Only official Dependabot PRs from this repository into `main` qualify. They must
+modify exactly `frontend/package.json` and `frontend/pnpm-lock.yaml`, keep the same
+direct dependencies, and change only exact, stable versions upwards within the
+same major. Pre-1.0 dependencies may receive patch updates only. Scripts, engines,
+package manager, overrides, maturity settings, and lifecycle-script permissions
+cannot change. Lockfile transitive changes remain subject to the full audit,
+package maturity policy, and container scan.
+
+All jobs in the latest CI attempt must succeed, including Frontend checks,
+Container build, Dependency review, and Automation policy. The tested head must
+include the latest `main`; if main advances, rebase the PR and let CI run again.
+Add the `do-not-automerge` label to opt out. Major upgrades, added/removed direct
+dependencies, container images, GitHub Actions, and application changes stay manual.
+A skipped evaluation leaves the PR open and records the reason in the Actions log.
+
+The privileged workflow checks out only its trusted default-branch revision,
+never PR code or artifacts. It rechecks PR identity, labels, mergeability and SHA
+before merging. A successful merge explicitly dispatches CI on `main`, because
+merges made with `GITHUB_TOKEN` do not trigger another push workflow. Disable the
+auto-merge workflow in the Actions UI to pause the feature repository-wide.
+
+Run the automation regression tests with Node.js from the repository root:
+
+```sh
+node .github/scripts/dependabot-automerge.test.cjs
+```
