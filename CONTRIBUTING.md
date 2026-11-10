@@ -37,7 +37,7 @@ Run the complete local gate before opening a pull request:
 
 ```sh
 pnpm run check
-pnpm audit --audit-level=high
+pnpm audit --audit-level=moderate
 ```
 
 Add or update tests for behavior changes. Request-building tests must confirm that
@@ -59,7 +59,8 @@ the lifecycle-script allowlist. Do not bypass these controls to make an upgrade 
 CI also runs daily at 20:23 UTC (04:23 Asia/Shanghai; scheduled runs may be delayed).
 Both CI and release builds rebuild the `runtime` stage without a layer cache, so
 `apk upgrade` fetches current security fixes while the frontend build stays cached.
-High/critical findings with available fixes still fail the gate; no CVEs are ignored.
+Dependency audit and review block moderate or worse findings; container scans block
+fixable high/critical findings. No CVEs are ignored.
 
 After successful main CI, automation updates outdated Dependabot frontend PRs from
 main and explicitly dispatches CI. It recovers missing dispatches, but does not

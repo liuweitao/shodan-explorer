@@ -6,6 +6,10 @@ overrides:
   'brace-expansion@>=5.0.0 <5.0.12': 5.0.12
   'source-map-js@>=1.0.0 <1.2.2': 1.2.2
   'postcss-selector-parser@>=7.0.0 <7.1.6': 7.1.6
+  # GHSA-3g3m-2fjr-6pw4 / GHSA-g3hv-75wg-m249. Parent ranges still use
+  # vulnerable majors; keep the override bounded and exercise their consumers.
+  'glob@>=13.0.0 <14.0.2': 14.0.3
+  'minimatch@>=10.0.0 <11.0.1': 11.0.4
 
 # Hold newly published packages for seven days so compromised releases have
 # time to be detected before they enter the lockfile.

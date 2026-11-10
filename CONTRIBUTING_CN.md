@@ -36,7 +36,7 @@ docker compose up -d shodan-proxy
 
 ```sh
 pnpm run check
-pnpm audit --audit-level=high
+pnpm audit --audit-level=moderate
 ```
 
 行为变更必须增加或更新测试。请求构造测试必须确认展示给用户的请求已隐藏 `key`
@@ -57,7 +57,8 @@ pnpm audit --audit-level=high
 
 CI 每天在 UTC 20:23（北京时间次日 04:23，调度可能延迟）执行一次。
 CI 和发布构建都禁用 `runtime` 阶段的层缓存，让 `apk upgrade` 获取最新安全修复，
-前端构建仍使用缓存。有修复版本的高危和严重漏洞继续阻止通过，不忽略 CVE。
+前端构建仍使用缓存。依赖审计与审查阻止中危及以上告警，容器扫描阻止有修复版本的高危和
+严重漏洞，不忽略 CVE。
 
 main 的 CI 成功后，自动化会将 main 同步到落后的 Dependabot 前端依赖 PR，并显式触发
 CI；如果触发请求曾丢失，会补发，但不盲目重试失败测试。兼容的精确补丁或次版本升级，
