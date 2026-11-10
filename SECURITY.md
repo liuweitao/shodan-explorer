@@ -156,3 +156,28 @@ Run the automation regression tests with Node.js from the repository root:
 ```sh
 node .github/scripts/dependabot-automerge.test.cjs
 ```
+
+### November 10, 2026 glob matcher fixes
+
+The remaining moderate development-tool advisories are patched with bounded
+`glob@>=13.0.0 <14.0.2` -> `14.0.3` and
+`minimatch@>=10.0.0 <11.0.1` -> `11.0.4` overrides:
+
+- [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4):
+  glob traversal continuing after cancellation.
+- [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249):
+  minimatch pattern amplification causing excessive resource use.
+
+The upstream js-beautify, EditorConfig, ESLint and typescript-eslint dependency
+ranges still select vulnerable versions. These overrides cross major versions,
+so they require review and are outside automatic merging. The project uses Node
+24, retains the seven-day release-age rule, and exercises ESLint glob/ignore
+selection, Vue wrapper HTML, and js-beautify CLI glob expansion with EditorConfig
+in `frontend/src/toolchain.test.ts`. The lockfile resolves mature releases,
+including `@isaacs/nonrecursive-glob-match@1.0.3` and `path-scurry@3.0.0`.
+
+CI, release dependency audits and PR dependency review now block moderate or
+higher findings. The full dependency audit reports no known vulnerabilities at
+this checkpoint. Remove each override once its normal parent dependency range
+resolves a patched version, and retain the consumer tests when upgrading the
+matcher major versions again.
