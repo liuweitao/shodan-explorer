@@ -134,12 +134,26 @@ async function refresh({ github, context, core }) {
         head_sha: pr.head.sha,
         per_page: 100,
       });
-      if (
-        data.workflow_runs.some((run) =>
-          ["pull_request", "workflow_dispatch"].includes(run.event),
-        )
-      )
+      const latest = data.workflow_runs.find(
+        (run) =>
+          ["pull_request", "workflow_dispatch"].includes(run.event) &&
+          run.conclusion !== "action_required",
+      );
+      if (latest) {
+        // Token-dispatched CI does not reliably emit another workflow_run.
+        // Re-evaluate completed success on each daily main sweep. Never retry
+        // an actual failing, pending or cancelled run automatically.
+        if (latest.status === "completed" && latest.conclusion === "success")
+          await automate({
+            github,
+            core,
+            context: {
+              ...context,
+              payload: { workflow_run: { id: latest.id } },
+            },
+          });
         continue;
+      }
     } else {
       // Never force-push or execute PR code. The API rejects conflicts and races.
       try {
@@ -154,7 +168,7 @@ async function refresh({ github, context, core }) {
         continue;
       }
     }
-    // GITHUB_TOKEN branch updates do not trigger pull_request CI. Explicitly
+    // Token branch updates create approval-only PR runs. Explicitly
     // dispatch the read-only CI workflow; its dependency review also runs here.
     await github.rest.actions.createWorkflowDispatch({
       ...repo,
@@ -276,10 +290,38 @@ async function automate({ github, context, core }) {
       ...repo,
       basehead: `${main.commit.sha}...${run.head_sha}`,
     });
+  let mergeStateAllowed = current.mergeable_state === "clean";
+  if (
+    current.mergeable_state === "unstable" &&
+    run.event === "workflow_dispatch"
+  ) {
+    const { data } = await github.rest.actions.listWorkflowRuns({
+      ...repo,
+      workflow_id: "ci.yml",
+      head_sha: run.head_sha,
+      per_page: 100,
+    });
+    // A GITHUB_TOKEN update also creates a duplicate approval-only PR suite.
+    // Accept only that known duplicate alongside the fully tested dispatch.
+    // Real failed/pending runs and protected-branch blocks still stop merging;
+    // GitHub's merge API independently enforces repository branch protection.
+    mergeStateAllowed =
+      data.workflow_runs.some(
+        (other) =>
+          other.event === "pull_request" &&
+          other.conclusion === "action_required",
+      ) &&
+      data.workflow_runs.every(
+        (other) =>
+          other.id === run.id ||
+          (other.event === "pull_request" &&
+            other.conclusion === "action_required"),
+      );
+  }
   if (
     !eligiblePull(current, repository, run.head_sha) ||
     current.mergeable !== true ||
-    current.mergeable_state !== "clean" ||
+    !mergeStateAllowed ||
     comparison.behind_by !== 0 ||
     comparison.status !== "ahead" ||
     current.base.sha !== main.commit.sha ||
