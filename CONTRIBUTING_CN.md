@@ -7,7 +7,7 @@
 
 ## 开始之前
 
-- 使用 Node 24 系列中不低于 24.15 的版本。
+- 使用 `.nvmrc` 固定的 Node.js 版本（Node 24 系列）。
 - 通过 Corepack 使用 `frontend/package.json` 固定的包管理器。
 - 绝不能提交 `.env`、`config/config.yaml`、`config/shodan_keys.yaml`、API Key、
   代理凭据或包含敏感内容的 Shodan 响应。
@@ -36,7 +36,7 @@ docker compose up -d shodan-proxy
 
 ```sh
 pnpm run check
-pnpm audit --prod --audit-level=high
+pnpm audit --audit-level=high
 ```
 
 行为变更必须增加或更新测试。请求构造测试必须确认展示给用户的请求已隐藏 `key`
@@ -52,3 +52,20 @@ pnpm audit --prod --audit-level=high
 
 依赖升级必须保留精确版本、七天观察期和安装脚本白名单。不得为了通过升级而绕过这些
 控制。
+
+## 自动依赖维护
+
+CI 每天在 UTC 20:23（北京时间次日 04:23，调度可能延迟）执行一次。
+CI 和发布构建都禁用 `runtime` 阶段的层缓存，让 `apk upgrade` 获取最新安全修复，
+前端构建仍使用缓存。有修复版本的高危和严重漏洞继续阻止通过，不忽略 CVE。
+
+main 的 CI 成功后，自动化会将 main 同步到落后的 Dependabot 前端依赖 PR，并显式触发
+CI；如果触发请求曾丢失，会补发，但不盲目重试失败测试。兼容的精确补丁或次版本升级，
+只有在当前提交包含最新 main 且四项检查全部通过时才会合并。1.0 之前的次版本、大版本、
+Docker 和 Actions 更新、配置修改和冲突仍需人工审查。添加 `do-not-automerge` 标签可同时
+关闭自动同步和合并。特权自动化只运行默认分支的可信代码，沿用已有令牌权限；PR CI
+只有仓库只读权限。
+
+每日安全扫描失败且全新 `apk upgrade` 仍不能修复时，需要核查上游修复版本，按需更新
+固定的基础镜像或依赖，并发布新版本替换已部署镜像。CI 通过不会更新已发布的镜像。
+历史失败记录保留用于审计。

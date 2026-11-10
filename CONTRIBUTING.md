@@ -7,7 +7,7 @@ security hardening, and focused feature proposals are welcome.
 
 ## Before you start
 
-- Use Node.js 24.15 or newer in the Node 24 line.
+- Use the Node.js version pinned in `.nvmrc` (Node 24).
 - Use the package manager pinned in `frontend/package.json` through Corepack.
 - Never commit `.env`, `config/config.yaml`, `config/shodan_keys.yaml`, API keys,
   proxy credentials, or captured Shodan responses containing sensitive data.
@@ -37,7 +37,7 @@ Run the complete local gate before opening a pull request:
 
 ```sh
 pnpm run check
-pnpm audit --prod --audit-level=high
+pnpm audit --audit-level=high
 ```
 
 Add or update tests for behavior changes. Request-building tests must confirm that
@@ -53,3 +53,24 @@ displayed snapshots redact the `key` parameter.
 
 Dependency updates must retain exact versions, the seven-day maturity policy, and
 the lifecycle-script allowlist. Do not bypass these controls to make an upgrade pass.
+
+## Automated dependency maintenance
+
+CI also runs daily at 20:23 UTC (04:23 Asia/Shanghai; scheduled runs may be delayed).
+Both CI and release builds rebuild the `runtime` stage without a layer cache, so
+`apk upgrade` fetches current security fixes while the frontend build stays cached.
+High/critical findings with available fixes still fail the gate; no CVEs are ignored.
+
+After successful main CI, automation updates outdated Dependabot frontend PRs from
+main and explicitly dispatches CI. It recovers missing dispatches, but does not
+blindly retry failed tests. A compatible exact patch/minor update can merge only
+when all four gates pass on its current head containing the latest main. Before-1.0
+minor updates, major versions, Docker and Actions changes, configuration changes,
+and conflicts require review. The `do-not-automerge` label disables both refresh
+and merge. Automation runs only trusted default-branch code and retains its
+existing token permissions; PR CI has read-only repository access.
+
+A failed daily security scan needs investigation if a fresh `apk upgrade` cannot
+fix it. Review the upstream fixed version, update a pinned base image or dependency
+when needed, and publish a new release to replace deployed images. A green CI run
+does not update an already published image. Old failed runs remain as audit history.
