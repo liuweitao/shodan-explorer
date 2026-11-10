@@ -78,7 +78,97 @@ function eligiblePull(pr, repository, sha) {
   );
 }
 
+async function refresh({ github, context, core }) {
+  const repo = context.repo;
+  const repository = `${repo.owner}/${repo.repo}`;
+  const pulls = await github.paginate(github.rest.pulls.list, {
+    ...repo,
+    state: "open",
+    base: "main",
+    per_page: 100,
+  });
+  for (const candidate of pulls) {
+    const { data: pr } = await github.rest.pulls.get({
+      ...repo,
+      pull_number: candidate.number,
+    });
+    if (!eligiblePull(pr, repository, pr.head.sha)) continue;
+    const files = await github.paginate(github.rest.pulls.listFiles, {
+      ...repo,
+      pull_number: pr.number,
+      per_page: 100,
+    });
+    if (!eligibleFiles(files)) continue;
+    const manifest = async (ref) => {
+      const { data } = await github.rest.repos.getContent({
+        ...repo,
+        path: "frontend/package.json",
+        ref,
+      });
+      if (data.type !== "file" || data.encoding !== "base64")
+        throw new Error("Invalid manifest response");
+      return JSON.parse(Buffer.from(data.content, "base64").toString("utf8"));
+    };
+    if (
+      !eligibleManifest(
+        await manifest(pr.base.sha),
+        await manifest(pr.head.sha),
+      )
+    )
+      continue;
+    const { data: main } = await github.rest.repos.getBranch({
+      ...repo,
+      branch: "main",
+    });
+    const { data: comparison } =
+      await github.rest.repos.compareCommitsWithBasehead({
+        ...repo,
+        basehead: `${main.commit.sha}...${pr.head.sha}`,
+      });
+    if (comparison.behind_by === 0) {
+      // Recover a missing dispatch (for example after an API outage between
+      // updateBranch and createWorkflowDispatch) without rerunning failed tests.
+      const { data } = await github.rest.actions.listWorkflowRuns({
+        ...repo,
+        workflow_id: "ci.yml",
+        head_sha: pr.head.sha,
+        per_page: 100,
+      });
+      if (
+        data.workflow_runs.some((run) =>
+          ["pull_request", "workflow_dispatch"].includes(run.event),
+        )
+      )
+        continue;
+    } else {
+      // Never force-push or execute PR code. The API rejects conflicts and races.
+      try {
+        await github.rest.pulls.updateBranch({
+          ...repo,
+          pull_number: pr.number,
+          expected_head_sha: pr.head.sha,
+        });
+      } catch (error) {
+        if (![409, 422].includes(error.status)) throw error;
+        core.warning(`PR #${pr.number} needs manual conflict/race resolution`);
+        continue;
+      }
+    }
+    // GITHUB_TOKEN branch updates do not trigger pull_request CI. Explicitly
+    // dispatch the read-only CI workflow; its dependency review also runs here.
+    await github.rest.actions.createWorkflowDispatch({
+      ...repo,
+      workflow_id: "ci.yml",
+      ref: pr.head.ref,
+    });
+    core.info(
+      `Dispatched fresh CI for PR #${pr.number} containing current main`,
+    );
+  }
+}
+
 async function automate({ github, context, core }) {
+  if (!context.payload.workflow_run) return;
   const repo = context.repo;
   const repository = `${repo.owner}/${repo.repo}`;
   const skip = (reason) => core.info(`Auto-merge skipped: ${reason}`);
@@ -87,13 +177,18 @@ async function automate({ github, context, core }) {
     run_id: context.payload.workflow_run.id,
   });
   if (
-    run.event !== "pull_request" ||
+    !["pull_request", "workflow_dispatch", "push", "schedule"].includes(
+      run.event,
+    ) ||
     run.conclusion !== "success" ||
     run.path !== ".github/workflows/ci.yml" ||
     run.head_repository?.full_name !== repository
   ) {
     return skip("requires successful PR CI from this repository");
   }
+  if (run.head_branch === "main") return refresh({ github, context, core });
+  if (!["pull_request", "workflow_dispatch"].includes(run.event))
+    return skip("requires a PR run or explicit branch CI");
   // GitHub can omit pull_requests for Dependabot runs. Resolve from the tested
   // commit through GitHub's API; never accept a number supplied by PR content.
   const associated = await github.paginate(
@@ -211,6 +306,7 @@ async function automate({ github, context, core }) {
 
 module.exports = {
   automate,
+  refresh,
   eligibleFiles,
   eligibleManifest,
   eligiblePull,
