@@ -403,3 +403,56 @@ test("recovers a missing dispatch without retrying failing or pending CI", async
     assert.equal(g.state.dispatched.length, 0);
   }
 });
+
+test("daily sweep rechecks green dispatch despite an approval-only duplicate", async () => {
+  const f = fixture();
+  f.state.run.event = "workflow_dispatch";
+  f.state.current.mergeable_state = "unstable";
+  f.state.runs = [
+    { id: 2, event: "pull_request", conclusion: "action_required" },
+    {
+      id: 1,
+      event: "workflow_dispatch",
+      status: "completed",
+      conclusion: "success",
+    },
+  ];
+  await f.refresh();
+  assert.equal(f.state.merged.length, 1);
+  assert.equal(f.state.dispatched[0].ref, "main");
+});
+
+test("approval-only runs cannot hide a missing dispatch", async () => {
+  const f = fixture();
+  f.state.runs = [
+    { id: 2, event: "pull_request", conclusion: "action_required" },
+  ];
+  await f.refresh();
+  assert.equal(f.state.merged.length, 0);
+  assert.equal(f.state.dispatched[0].ref, pull().head.ref);
+});
+
+test("unstable PRs still reject actual failing or pending runs and protected blocks", async () => {
+  for (const extra of [
+    { id: 3, event: "pull_request", conclusion: "failure" },
+    { id: 3, event: "workflow_dispatch", status: "in_progress" },
+  ]) {
+    const f = fixture();
+    f.state.run.event = "workflow_dispatch";
+    f.state.current.mergeable_state = "unstable";
+    f.state.runs = [
+      { id: 2, event: "pull_request", conclusion: "action_required" },
+      extra,
+    ];
+    await f.run();
+    assert.equal(f.state.merged.length, 0);
+  }
+  const f = fixture();
+  f.state.current.mergeable_state = "blocked";
+  f.state.run.event = "workflow_dispatch";
+  f.state.runs = [
+    { id: 2, event: "pull_request", conclusion: "action_required" },
+  ];
+  await f.run();
+  assert.equal(f.state.merged.length, 0);
+});

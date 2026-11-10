@@ -74,3 +74,10 @@ A failed daily security scan needs investigation if a fresh `apk upgrade` cannot
 fix it. Review the upstream fixed version, update a pinned base image or dependency
 when needed, and publish a new release to replace deployed images. A green CI run
 does not update an already published image. Old failed runs remain as audit history.
+
+Token-created branch updates also produce an approval-only duplicate PR run.
+The explicitly dispatched CI supplies all four read-only gates. Daily successful
+main sweeps re-evaluate existing green results because token-triggered events can
+suppress the next workflow_run. Only the known approval-only duplicate may coexist
+with a successful dispatch; actual failed/pending CI and branch-protection blocks
+continue to prevent merging. No extra token or write permission is needed.
