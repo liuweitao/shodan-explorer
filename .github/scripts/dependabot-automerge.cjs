@@ -2,14 +2,53 @@ const { isDeepStrictEqual } = require("node:util");
 
 const REQUIRED_JOBS = [
   "Frontend checks",
-  "Container build",
+  "Container build (amd64)",
+  "Container build (arm64)",
   "Dependency review",
   "Automation policy",
 ];
-const ALLOWED_FILES = new Set([
+const NPM_FILES = new Set([
   "frontend/package.json",
   "frontend/pnpm-lock.yaml",
 ]);
+const DOCKERFILE = "frontend/Dockerfile";
+const CI_WORKFLOW = ".github/workflows/ci.yml";
+const DEPENDABOT_BRANCHES = {
+  npm: "dependabot/npm_and_yarn/frontend/",
+  docker: "dependabot/docker/frontend/",
+  actions: "dependabot/github_actions/",
+};
+const REVIEWED_ACTIONS = new Set([
+  "actions/checkout",
+  "actions/dependency-review-action",
+  "actions/setup-node",
+  "aquasecurity/trivy-action",
+  "docker/build-push-action",
+  "docker/setup-buildx-action",
+]);
+
+function stableVersion(version) {
+  const parts = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+    .exec(version)
+    ?.slice(1)
+    .map(Number);
+  return parts?.every(Number.isSafeInteger) ? parts : null;
+}
+
+function compatibleUpgrade(from, to, allowMinor = true) {
+  const [major, minor, patch] = from;
+  const [nextMajor, nextMinor, nextPatch] = to;
+  if (major !== nextMajor) return false;
+  if (minor === nextMinor) return nextPatch > patch;
+  // Pre-1.0 minor updates can break compatibility.
+  return allowMinor && major > 0 && nextMinor > minor;
+}
+
+function updateType(branch) {
+  return Object.keys(DEPENDABOT_BRANCHES).find((type) =>
+    branch.startsWith(DEPENDABOT_BRANCHES[type]),
+  );
+}
 
 function eligibleManifest(before, after) {
   const oldOther = { ...before };
@@ -26,21 +65,11 @@ function eligibleManifest(before, after) {
     )
       return false;
     for (const name of Object.keys(oldDeps)) {
-      const oldVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(
-        oldDeps[name],
-      );
-      const newVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(
-        newDeps[name],
-      );
+      const oldVersion = stableVersion(oldDeps[name]);
+      const newVersion = stableVersion(newDeps[name]);
       if (!oldVersion || !newVersion) return false;
       if (oldDeps[name] === newDeps[name]) continue;
-      const [, major, minor, patch] = oldVersion.map(Number);
-      const [, nextMajor, nextMinor, nextPatch] = newVersion.map(Number);
-      // Pre-1.0 minor updates can break compatibility; only patches qualify.
-      if (major !== nextMajor || (major === 0 && minor !== nextMinor))
-        return false;
-      if (nextMinor < minor || (nextMinor === minor && nextPatch <= patch))
-        return false;
+      if (!compatibleUpgrade(oldVersion, newVersion)) return false;
       changed = true;
     }
     delete oldOther[field];
@@ -50,16 +79,155 @@ function eligibleManifest(before, after) {
   return changed && isDeepStrictEqual(oldOther, newOther);
 }
 
-function eligibleFiles(files) {
+function eligibleFiles(files, type = "npm") {
+  const allowedPaths = {
+    npm: NPM_FILES,
+    docker: new Set([DOCKERFILE]),
+    actions: new Set([CI_WORKFLOW]),
+  }[type];
+  if (!allowedPaths || !Array.isArray(files)) return false;
   return (
-    files.length === 2 &&
+    files.length === allowedPaths.size &&
+    new Set(files.map((file) => file.filename)).size === allowedPaths.size &&
     files.every(
       (file) =>
-        ALLOWED_FILES.has(file.filename) &&
+        allowedPaths.has(file.filename) &&
         file.status === "modified" &&
         !file.previous_filename,
     )
   );
+}
+
+function eligibleDockerfile(before, after) {
+  const oldLines = before.split("\n");
+  const newLines = after.split("\n");
+  if (oldLines.length !== newLines.length) return false;
+  const images = new Set();
+  const from = /^FROM (node|nginx):([0-9.]+)(-alpine[0-9]+\.[0-9]+)@sha256:([a-f0-9]{64}) AS (build|runtime)$/;
+  for (let index = 0; index < oldLines.length; index++) {
+    if (oldLines[index] === newLines[index]) continue;
+    const oldImage = from.exec(oldLines[index]);
+    const newImage = from.exec(newLines[index]);
+    if (!oldImage || !newImage) return false;
+    const [, image, oldTag, oldVariant, oldDigest, stage] = oldImage;
+    const [, nextImage, newTag, newVariant, newDigest, nextStage] = newImage;
+    const oldVersion = stableVersion(oldTag);
+    const newVersion = stableVersion(newTag);
+    if (
+      image !== nextImage ||
+      stage !== nextStage ||
+      stage !== (image === "node" ? "build" : "runtime") ||
+      images.has(image) ||
+      oldVariant !== newVariant ||
+      oldDigest === newDigest ||
+      !oldVersion ||
+      !newVersion ||
+      (oldTag !== newTag && !compatibleUpgrade(oldVersion, newVersion, false))
+    )
+      return false;
+    images.add(image);
+  }
+  return images.size > 0;
+}
+
+function actionUpdates(before, after) {
+  const oldLines = before.split("\n");
+  const newLines = after.split("\n");
+  if (oldLines.length !== newLines.length) return [];
+  const updates = new Map();
+  const uses = /^( +uses: )([a-z0-9-]+\/[a-z0-9-]+)@([a-f0-9]{40}) # v([0-9.]+)$/;
+  for (let index = 0; index < oldLines.length; index++) {
+    if (oldLines[index] === newLines[index]) continue;
+    const previous = uses.exec(oldLines[index]);
+    const next = uses.exec(newLines[index]);
+    if (!previous || !next) return [];
+    const [, prefix, action, oldSha, oldTag] = previous;
+    const [, nextPrefix, nextAction, sha, tag] = next;
+    const oldVersion = stableVersion(oldTag);
+    const newVersion = stableVersion(tag);
+    if (
+      prefix !== nextPrefix ||
+      action !== nextAction ||
+      !REVIEWED_ACTIONS.has(action) ||
+      oldSha === sha ||
+      !oldVersion ||
+      !newVersion ||
+      !compatibleUpgrade(oldVersion, newVersion)
+    )
+      return [];
+    const key = action + "@" + tag;
+    if (updates.has(key) && updates.get(key).sha !== sha) return [];
+    updates.set(key, { action, tag, sha });
+  }
+  return [...updates.values()];
+}
+
+function contents(data) {
+  if (data.encoding !== "base64") throw new Error("Invalid file response");
+  return Buffer.from(data.content, "base64").toString("utf8");
+}
+
+async function changedFile(github, repo, file, base) {
+  const [previous, next] = await Promise.all([
+    github.rest.repos.getContent({ ...repo, path: file.filename, ref: base }),
+    github.rest.git.getBlob({ ...repo, file_sha: file.sha }),
+  ]);
+  if (previous.data.type !== "file") throw new Error("Invalid base file");
+  return [contents(previous.data), contents(next.data)];
+}
+
+async function validateUpdate(github, repo, pr, comparison, type, core) {
+  const files = comparison.files;
+  if (!eligibleFiles(files, type)) {
+    if (type === "actions")
+      core.info("PR #" + pr.number + " needs manual review of workflow changes");
+    return false;
+  }
+  const file =
+    type === "npm"
+      ? files.find((entry) => entry.filename === "frontend/package.json")
+      : files[0];
+  const [before, after] = await changedFile(
+    github,
+    repo,
+    file,
+    comparison.merge_base_commit.sha,
+  );
+  if (type === "npm")
+    return eligibleManifest(JSON.parse(before), JSON.parse(after));
+  if (type === "docker") return eligibleDockerfile(before, after);
+
+  // Check Action updates from trusted main code. Updating workflow files needs
+  // a maintainer because the built-in token cannot write workflows.
+  const updates = actionUpdates(before, after);
+  let verified;
+  try {
+    const matches = await Promise.all(
+      updates.map(async ({ action, tag, sha }) => {
+        // Upstream repositories are public, so verification needs no token.
+        const response = await fetch(
+          "https://api.github.com/repos/" + action + "/commits/v" + tag,
+          {
+            headers: { Accept: "application/vnd.github+json" },
+            signal: AbortSignal.timeout(7000),
+          },
+        );
+        if (response.status === 404) return false;
+        if (!response.ok) throw new Error("GitHub API HTTP " + response.status);
+        const commit = await response.json();
+        return commit.sha === sha;
+      }),
+    );
+    verified = matches.length > 0 && matches.every(Boolean);
+  } catch {
+    core.info("PR #" + pr.number + ": upstream Action verification unavailable");
+    return false;
+  }
+  const message = verified
+    ? "verified upstream Action tags and commit SHAs. Maintainer merge required"
+    : "needs manual review of Action versions or workflow changes";
+  core.info("PR #" + pr.number + " (" + pr.head.sha + "): " + message);
+  return false;
 }
 
 function eligiblePull(pr, repository, sha) {
@@ -72,7 +240,7 @@ function eligiblePull(pr, repository, sha) {
     pr.base.ref === "main" &&
     pr.base.repo.full_name === repository &&
     pr.head.repo?.full_name === repository &&
-    pr.head.ref.startsWith("dependabot/npm_and_yarn/frontend/") &&
+    Boolean(updateType(pr.head.ref)) &&
     pr.head.sha === sha &&
     !pr.labels.some((label) => label.name === "do-not-automerge")
   );
@@ -93,29 +261,7 @@ async function refresh({ github, context, core }) {
       pull_number: candidate.number,
     });
     if (!eligiblePull(pr, repository, pr.head.sha)) continue;
-    const files = await github.paginate(github.rest.pulls.listFiles, {
-      ...repo,
-      pull_number: pr.number,
-      per_page: 100,
-    });
-    if (!eligibleFiles(files)) continue;
-    const manifest = async (ref) => {
-      const { data } = await github.rest.repos.getContent({
-        ...repo,
-        path: "frontend/package.json",
-        ref,
-      });
-      if (data.type !== "file" || data.encoding !== "base64")
-        throw new Error("Invalid manifest response");
-      return JSON.parse(Buffer.from(data.content, "base64").toString("utf8"));
-    };
-    if (
-      !eligibleManifest(
-        await manifest(pr.base.sha),
-        await manifest(pr.head.sha),
-      )
-    )
-      continue;
+    const type = updateType(pr.head.ref);
     const { data: main } = await github.rest.repos.getBranch({
       ...repo,
       branch: "main",
@@ -123,8 +269,11 @@ async function refresh({ github, context, core }) {
     const { data: comparison } =
       await github.rest.repos.compareCommitsWithBasehead({
         ...repo,
-        basehead: `${main.commit.sha}...${pr.head.sha}`,
+        basehead: main.commit.sha + "..." + pr.head.sha,
+        per_page: 1,
       });
+    if (!(await validateUpdate(github, repo, pr, comparison, type, core)))
+      continue;
     if (comparison.behind_by === 0) {
       // Recover a missing dispatch (for example after an API outage between
       // updateBranch and createWorkflowDispatch) without rerunning failed tests.
@@ -195,7 +344,7 @@ async function automate({ github, context, core }) {
       run.event,
     ) ||
     run.conclusion !== "success" ||
-    run.path !== ".github/workflows/ci.yml" ||
+    run.path !== CI_WORKFLOW ||
     run.head_repository?.full_name !== repository
   ) {
     return skip("requires successful PR CI from this repository");
@@ -250,31 +399,6 @@ async function automate({ github, context, core }) {
   ) {
     return skip("every CI job must pass, including all required gates");
   }
-  const files = await github.paginate(github.rest.pulls.listFiles, {
-    ...repo,
-    pull_number: pr.number,
-    per_page: 100,
-  });
-  if (!eligibleFiles(files))
-    return skip("only the frontend manifest and lockfile may change");
-
-  const manifest = async (ref) => {
-    const { data } = await github.rest.repos.getContent({
-      ...repo,
-      path: "frontend/package.json",
-      ref,
-    });
-    if (data.type !== "file" || data.encoding !== "base64")
-      throw new Error("Invalid manifest response");
-    return JSON.parse(Buffer.from(data.content, "base64").toString("utf8"));
-  };
-  const [before, after] = await Promise.all([
-    manifest(pr.base.sha),
-    manifest(pr.head.sha),
-  ]);
-  if (!eligibleManifest(before, after))
-    return skip("requires exact, stable, compatible dependency upgrades");
-
   // Recheck both branch tips. The tested head must contain the latest main so
   // merging cannot introduce an untested combination of changes.
   const { data: current } = await github.rest.pulls.get({
@@ -288,8 +412,15 @@ async function automate({ github, context, core }) {
   const { data: comparison } =
     await github.rest.repos.compareCommitsWithBasehead({
       ...repo,
-      basehead: `${main.commit.sha}...${run.head_sha}`,
+      basehead: main.commit.sha + "..." + run.head_sha,
+    per_page: 1,
     });
+  if (!eligiblePull(current, repository, run.head_sha))
+    return skip("PR changed, is blocked, or needs fresh CI on main");
+  const type = updateType(pr.head.ref);
+  if (!(await validateUpdate(github, repo, pr, comparison, type, core)))
+    return skip("files or versions fall outside the auto-merge policy");
+
   let mergeStateAllowed = current.mergeable_state === "clean";
   if (
     current.mergeable_state === "unstable" &&
@@ -318,9 +449,15 @@ async function automate({ github, context, core }) {
             other.conclusion === "action_required"),
       );
   }
+  const { data: latest } = await github.rest.pulls.get({
+    ...repo,
+    pull_number: pr.number,
+  });
   if (
-    !eligiblePull(current, repository, run.head_sha) ||
-    current.mergeable !== true ||
+    !eligiblePull(latest, repository, run.head_sha) ||
+    latest.mergeable !== true ||
+    latest.mergeable_state !== current.mergeable_state ||
+    latest.base.sha !== main.commit.sha ||
     !mergeStateAllowed ||
     comparison.behind_by !== 0 ||
     comparison.status !== "ahead" ||
@@ -351,6 +488,8 @@ module.exports = {
   refresh,
   eligibleFiles,
   eligibleManifest,
+  eligibleDockerfile,
+  actionUpdates,
   eligiblePull,
   REQUIRED_JOBS,
 };

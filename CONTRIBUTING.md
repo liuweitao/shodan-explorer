@@ -62,14 +62,14 @@ Both CI and release builds rebuild the `runtime` stage without a layer cache, so
 Dependency audit and review block moderate or worse findings; container scans block
 fixable high/critical findings. No CVEs are ignored.
 
-After successful main CI, automation updates outdated Dependabot frontend PRs from
-main and explicitly dispatches CI. It recovers missing dispatches, but does not
-blindly retry failed tests. A compatible exact patch/minor update can merge only
-when all four gates pass on its current head containing the latest main. Before-1.0
-minor updates, major versions, Docker and Actions changes, configuration changes,
-and conflicts require review. The `do-not-automerge` label disables both refresh
-and merge. Automation runs only trusted default-branch code and retains its
-existing token permissions; PR CI has read-only repository access.
+After successful main CI, automation refreshes eligible Dependabot frontend
+dependencies and pinned Docker base images against main, recovers missing CI
+dispatches, and merges the tested head when all CI jobs pass. Container builds,
+smoke tests, and scans run on amd64 and arm64. For read-only CI Action updates,
+automation verifies eligible changes against the upstream tags and logs the
+result for the maintainer who merges the PR. Add the `do-not-automerge` label to
+opt out. See [Dependency auto-merge](SECURITY.md#dependency-auto-merge) for the
+version and file rules.
 
 A failed daily security scan needs investigation if a fresh `apk upgrade` cannot
 fix it. Review the upstream fixed version, update a pinned base image or dependency
@@ -77,7 +77,7 @@ when needed, and publish a new release to replace deployed images. A green CI ru
 does not update an already published image. Old failed runs remain as audit history.
 
 Token-created branch updates also produce an approval-only duplicate PR run.
-The explicitly dispatched CI supplies all four read-only gates. Daily successful
+The explicitly dispatched CI runs all read-only checks. Daily successful
 main sweeps re-evaluate existing green results because token-triggered events can
 suppress the next workflow_run. Only the known approval-only duplicate may coexist
 with a successful dispatch; actual failed/pending CI and branch-protection blocks

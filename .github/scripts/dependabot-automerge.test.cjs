@@ -4,6 +4,8 @@ const {
   automate,
   refresh,
   eligibleManifest,
+  eligibleDockerfile,
+  actionUpdates,
   eligibleFiles,
   eligiblePull,
   REQUIRED_JOBS,
@@ -20,6 +22,7 @@ const files = () =>
   ["frontend/package.json", "frontend/pnpm-lock.yaml"].map((filename) => ({
     filename,
     status: "modified",
+    sha: "changed-blob",
   }));
 const pull = () => ({
   number: 123,
@@ -36,6 +39,11 @@ const pull = () => ({
   mergeable: true,
   mergeable_state: "clean",
 });
+
+const encode = (value) =>
+  Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString(
+    "base64",
+  );
 
 function fixture() {
   const state = {
@@ -57,6 +65,8 @@ function fixture() {
     associated: [{ number: 123, state: "open", base: { ref: "main" } }],
     behind: 0,
     comparisonStatus: "ahead",
+    mergeBase: "base",
+    contentReads: [],
     jobs: REQUIRED_JOBS.map((name) => ({
       name,
       status: "completed",
@@ -72,11 +82,16 @@ function fixture() {
   };
   let reads = 0;
   const listJobsForWorkflowRun = () => {};
-  const listFiles = () => {};
   const listPulls = () => {};
   const listPullRequestsAssociatedWithCommit = () => {};
   const github = {
     rest: {
+      git: {
+        getBlob: async ({ file_sha }) => {
+          assert.equal(file_sha, "changed-blob");
+          return { data: { encoding: "base64", content: encode(state.after) } };
+        },
+      },
       actions: {
         getWorkflowRun: async () => ({ data: state.run }),
         listJobsForWorkflowRun,
@@ -85,7 +100,6 @@ function fixture() {
       },
       pulls: {
         get: async () => ({ data: reads++ === 0 ? state.pr : state.current }),
-        listFiles,
         list: listPulls,
         updateBranch: async (args) => {
           if (state.updateError) throw state.updateError;
@@ -100,28 +114,32 @@ function fixture() {
       repos: {
         listPullRequestsAssociatedWithCommit,
         compareCommitsWithBasehead: async () => ({
-          data: { behind_by: state.behind, status: state.comparisonStatus },
-        }),
-        getContent: async ({ ref }) => ({
           data: {
-            type: "file",
-            encoding: "base64",
-            content: Buffer.from(
-              JSON.stringify(ref === "base" ? state.before : state.after),
-            ).toString("base64"),
+            behind_by: state.behind,
+            status: state.comparisonStatus,
+            files: state.files,
+            merge_base_commit: { sha: state.mergeBase },
           },
         }),
+        getContent: async ({ path, ref }) => {
+          state.contentReads.push({ path, ref });
+          return {
+            data: {
+              type: "file",
+              encoding: "base64",
+              content: encode(state.before),
+            },
+          };
+        },
         getBranch: async () => ({ data: { commit: { sha: state.main } } }),
       },
     },
     paginate: async (method) =>
       method === listPulls
         ? state.pulls
-        : method === listFiles
-          ? state.files
-          : method === listPullRequestsAssociatedWithCommit
-            ? state.associated
-            : state.jobs,
+        : method === listPullRequestsAssociatedWithCommit
+          ? state.associated
+          : state.jobs,
   };
   return {
     state,
@@ -455,4 +473,139 @@ test("unstable PRs still reject actual failing or pending runs and protected blo
   ];
   await f.run();
   assert.equal(f.state.merged.length, 0);
+});
+
+const nodeImage = (tag, digest) =>
+  "FROM node:" + tag + "-alpine3.24@sha256:" + digest.repeat(64) + " AS build";
+const nginxImage = (digest) =>
+  "FROM nginx:1.31.8-alpine3.24@sha256:" + digest.repeat(64) + " AS runtime";
+
+const oldDockerfile = [nodeImage("24.22.1", "a"), "RUN pnpm build", nginxImage("b"), ""].join("\n");
+const newDockerfile = [nodeImage("24.22.3", "c"), "RUN pnpm build", nginxImage("d"), ""].join("\n");
+
+function dependencyFixture(type, path, before, after) {
+  const f = fixture();
+  const branch = "dependabot/" + type + "/group";
+  f.state.pr.head.ref = branch;
+  f.state.current.head.ref = branch;
+  f.state.files = [{ filename: path, status: "modified", sha: "changed-blob" }];
+  f.state.before = before;
+  f.state.after = after;
+  return f;
+}
+
+test("accepts grouped digest updates and compatible image patches without other edits", () => {
+  assert.equal(eligibleDockerfile(oldDockerfile, newDockerfile), true);
+  assert.equal(eligibleDockerfile(oldDockerfile, oldDockerfile.replace(nginxImage("b"), nginxImage("d"))), true);
+  for (const rejected of [
+    oldDockerfile,
+    newDockerfile.replace("RUN pnpm build", "RUN pnpm lint"),
+    newDockerfile.replace("24.22.3", "25.22.3"),
+    newDockerfile.replace("24.22.3", "24.23.0"),
+    newDockerfile.replace("24.22.3", "24.22.0"),
+    newDockerfile.replace("alpine3.24", "alpine3.25"),
+    newDockerfile.replace("FROM node:", "FROM someone/node:"),
+    newDockerfile.replace("AS build", "AS other"),
+    newDockerfile.replace("c".repeat(64), "a".repeat(64)),
+    newDockerfile + "RUN something\n",
+  ])
+    assert.equal(eligibleDockerfile(oldDockerfile, rejected), false, rejected);
+});
+
+test("merges eligible Docker PRs only after successful builds on both platforms", async () => {
+  for (const armPassed of [true, false]) {
+    const f = dependencyFixture(
+      "docker/frontend", "frontend/Dockerfile", oldDockerfile, newDockerfile,
+    );
+    if (!armPassed)
+      f.state.jobs = f.state.jobs.filter((job) => job.name !== "Container build (arm64)");
+    await f.run();
+    assert.equal(f.state.merged.length, armPassed ? 1 : 0);
+  }
+});
+
+test("refresh compares a stale Docker PR against its merge base and redispatches CI", async () => {
+  const f = dependencyFixture(
+    "docker/frontend", "frontend/Dockerfile", oldDockerfile, newDockerfile,
+  );
+  f.state.behind = 1;
+  f.state.main = "new-main";
+  f.state.mergeBase = "previous-main";
+  await f.refresh();
+  assert.deepEqual(f.state.contentReads, [
+    { path: "frontend/Dockerfile", ref: "previous-main" },
+  ]);
+  assert.equal(f.state.updated[0].expected_head_sha, "head");
+  assert.equal(f.state.dispatched[0].ref, "dependabot/docker/frontend/group");
+});
+
+const reviewAction = (tag, sha) =>
+  "        uses: actions/dependency-review-action@" + sha.repeat(40) + " # v" + tag;
+const workflow = (action) => [
+  "permissions:", "  contents: read", "    steps:", action, "        with:",
+  "          fail-on-severity: moderate", "",
+].join("\n");
+const previousWorkflow = workflow(reviewAction("5.0.0", "a"));
+const updatedWorkflow = workflow(reviewAction("5.0.1", "b"));
+
+test("accepts only allowed, version-only Action changes in the CI file", () => {
+  assert.deepEqual(actionUpdates(previousWorkflow, updatedWorkflow), [
+    { action: "actions/dependency-review-action", sha: "b".repeat(40), tag: "5.0.1" },
+  ]);
+  for (const rejected of [
+    previousWorkflow,
+    workflow(reviewAction("6.0.0", "b")),
+    workflow(reviewAction("5.0.1", "a")),
+    workflow(reviewAction("5.0.1", "b").replace("actions/", "unknown/")),
+    updatedWorkflow.replace("contents: read", "contents: write"),
+    updatedWorkflow.replace("fail-on-severity: moderate", "fail-on-severity: high"),
+  ])
+    assert.deepEqual(actionUpdates(previousWorkflow, rejected), []);
+});
+
+test("reports Action verification without merging, refreshing or dispatching", async (t) => {
+  for (const launch of ["run", "refresh"]) {
+    for (const [status, sha, message] of [
+      [200, "b", /verified upstream/],
+      [200, "c", /needs manual review/],
+      [404, "b", /needs manual review/],
+      [503, "b", /upstream Action verification unavailable/],
+    ]) {
+      await t.test(launch + " " + status + " " + sha, async (testCase) => {
+        const fetch = testCase.mock.method(globalThis, "fetch", async () => ({
+          status,
+          ok: status === 200,
+          json: async () => ({ sha: sha.repeat(40) }),
+        }));
+        const f = dependencyFixture(
+          "github_actions",
+          ".github/workflows/ci.yml",
+          previousWorkflow,
+          updatedWorkflow,
+        );
+        await f[launch]();
+        assert.equal(fetch.mock.callCount(), 1);
+        assert.equal(
+          fetch.mock.calls[0].arguments[0],
+          "https://api.github.com/repos/actions/dependency-review-action/commits/v5.0.1",
+        );
+        assert.match(f.state.messages[0], message);
+        assert.deepEqual(f.state.merged, []);
+        assert.deepEqual(f.state.updated, []);
+        assert.deepEqual(f.state.dispatched, []);
+      });
+    }
+  }
+});
+
+test("leaves privileged and release workflow changes for maintainers", async () => {
+  for (const path of [
+    ".github/workflows/dependabot-automerge.yml",
+    ".github/workflows/docker-build-push.yml",
+  ]) {
+    const f = dependencyFixture("github_actions", path, previousWorkflow, updatedWorkflow);
+    await f.run();
+    assert.match(f.state.messages[0], /manual review of workflow changes/);
+    assert.deepEqual(f.state.merged, []);
+  }
 });
