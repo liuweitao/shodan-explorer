@@ -67,8 +67,16 @@ jobs:
         run: pnpm audit --audit-level=moderate
 
   container:
-    name: Container build
-    runs-on: ubuntu-latest
+    name: Container build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,8 +91,9 @@ jobs:
           load: true
           push: false
           tags: shodan-explorer:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/${{ matrix.arch }}
+          cache-from: type=gha,scope=ci-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.arch }}
           # Refresh OS security fixes even when the pinned image has not changed.
           no-cache-filters: runtime
 
